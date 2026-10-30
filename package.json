@@ -1,0 +1,20 @@
+{
+  "name": "bailbridge",
+  "private": true,
+  "version": "0.1.0",
+  "description": "BailBridge — From Detention Threshold to Verified Release. Legal-aid coordination and audit prototype for undertrial cases (s.479 BNSS).",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "contracts"
+  ],
+  "scripts": {
+    "contracts:compile": "npm run compile -w contracts",
+    "contracts:test": "npm test -w contracts",
+    "chain": "npm run node -w contracts",
+    "deploy:local": "npm run deploy:local -w contracts",
+    "deploy:sepolia": "npm run deploy:sepolia -w contracts"
+  }
+}

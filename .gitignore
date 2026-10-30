@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+coverage/
+
+# Hardhat
+contracts/artifacts/
+contracts/cache/
+contracts/typechain-types/
+
+# Server runtime data
+server/data/*.db
+server/data/*.db-*
+server/storage/
+
+# Local deployments (Sepolia deployment file may be committed intentionally)
+deployments/localhost.json
+server/src/generated/
+web/src/generated/
