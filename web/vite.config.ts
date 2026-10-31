@@ -14,11 +14,19 @@ export default defineConfig({
   define: {
     __DEPLOYMENT__: JSON.stringify(deployment?.address ? deployment : null),
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Separate long-lived vendor chunks (ethers is the largest dependency).
+        manualChunks: { ethers: ["ethers"], react: ["react", "react-dom", "react-router-dom"] },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: { "/api": "http://localhost:4000" },
   },
   test: {
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
 });

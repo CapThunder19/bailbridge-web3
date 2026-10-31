@@ -8,6 +8,8 @@ import { ReviewClock } from "../components/ReviewClock";
 import { Timeline } from "../components/Timeline";
 import { Card, Dl, Hash, Notice, Spinner } from "../components/ui";
 import { LawyerPanel } from "../components/panels/LawyerPanel";
+import { OrdersCard } from "../components/panels/OrdersCard";
+import { PrisonPanel } from "../components/panels/PrisonPanel";
 
 function AdvisoryCard({ caseId, version }: { caseId: string; version: string }) {
   const [summary, setSummary] = useState<AdvisorySummary | null>(null);
@@ -105,7 +107,9 @@ export function CaseDetail() {
             </p>
             <Timeline steps={detail.workflow.steps} />
           </Card>
+          {user.role === "prison" && <PrisonPanel detail={detail} user={user} onChange={load} />}
           {user.role === "lawyer" && <LawyerPanel detail={detail} user={user} onChange={load} />}
+          <OrdersCard detail={detail} user={user} onChange={load} />
         </div>
 
         <aside className="space-y-6">
