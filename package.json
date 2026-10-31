@@ -18,6 +18,7 @@
     "deploy:local": "npm run deploy:local -w contracts",
     "deploy:sepolia": "npm run deploy:sepolia -w contracts",
     "server:test": "npm test -w server",
-    "server:build": "npm run build -w server"
+    "server:build": "npm run build -w server",
+    "server:dev": "npm run dev -w server"
   }
 }
