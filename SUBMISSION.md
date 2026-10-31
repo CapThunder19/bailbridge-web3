@@ -39,7 +39,7 @@ The parties do not share a database or fully trust each other. A shared append-o
 | Public `/verify` and `/release-clock` reading the contract via public RPC | No integration with e-Courts, ICJS or FASTER |
 | Order supersession (P1): append-only old → new link, fresh prison receipt required, shown on `/verify` |
 | Seed script: 5 demo cases + a revoked order, DB and chain in agreement | Gemini advisory summary is optional; a deterministic summary is used without a key |
-| Off-chain mode (no fake tx hashes) | Sepolia deployment: steps documented, **not yet deployed** |
+| Off-chain mode (no fake tx hashes) | Demo role wallets on Sepolia are test wallets, not institutions |
 | End-to-end tests on a real Hardhat node; live-stack browser wallet tests (119 tests in total) | UI not click-tested with MetaMask in an automated browser |
 
 ## Tech stack
@@ -48,7 +48,7 @@ The parties do not share a database or fully trust each other. A shared append-o
 - **Server:** Node 20+, Express, TypeScript, SQLite (better-sqlite3), Zod, ethers v6, pdf-lib, qrcode, optional Gemini
 - **Web:** Vite, React, TypeScript, Tailwind, ethers v6 + MetaMask (no wagmi/RainbowKit)
 - **Tests:** Hardhat (contracts), Vitest (screening, hashing, API, end-to-end, browser modules)
-- **Chain:** Hardhat local for development; Sepolia for a public demo (steps documented)
+- **Chain:** Hardhat local for development; deployed on Sepolia for the public demo
 
 ## Legal-tech relevance
 
@@ -74,4 +74,4 @@ It is designed to complement official systems such as the Supreme Court's FASTER
 - Repository: `<add repository URL>`
 - Demo video (3 min): `<add video URL>`
 - Live demo: `<add URL if hosted>`
-- Contract on Sepolia: `<add address and explorer link only after deployment>`
+- Contract on Sepolia: [`0x21f3eefB7F513c68C8677cD4D153126Ad1ce7591`](https://sepolia.etherscan.io/address/0x21f3eefB7F513c68C8677cD4D153126Ad1ce7591) (deployment block 12033500)

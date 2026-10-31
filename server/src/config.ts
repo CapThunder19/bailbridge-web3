@@ -72,17 +72,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     offChainReason = `no deployment file at ${path.relative(REPO_ROOT, deploymentFile)}`;
   } else {
     const isLocal = deployment.chainId === 31337;
-    const rpcUrl = env.RPC_URL || (isLocal ? (deployment.publicRpcUrl ?? "http://127.0.0.1:8545") : "");
-    const registrarKey = env.REGISTRAR_PRIVATE_KEY || (isLocal ? HARDHAT_ACCOUNT_0_KEY : "");
+    // A local Hardhat deployment always uses the local node and Hardhat account #0, so Sepolia
+    // values in .env never leak into local development.
+    const rpcUrl = isLocal ? (deployment.publicRpcUrl ?? "http://127.0.0.1:8545") : env.RPC_URL || "";
+    const registrarKey = isLocal ? HARDHAT_ACCOUNT_0_KEY : env.REGISTRAR_PRIVATE_KEY || "";
     if (!rpcUrl) offChainReason = "RPC_URL is not set";
     else if (!registrarKey) offChainReason = "REGISTRAR_PRIVATE_KEY is not set";
     else chain = { rpcUrl, registrarKey, deployment };
   }
 
+  const dataSuffix = chain ? chain.deployment.network.replace(/[^a-z0-9-]/gi, "") || `chain${chain.deployment.chainId}` : "offchain";
   const roles = deployment?.roles;
-  const localDefaults = deployment?.chainId === 31337 || !deployment ? HARDHAT_DEFAULT_WALLETS : null;
+  const local = deployment?.chainId === 31337 || !deployment;
+  const localDefaults = local ? HARDHAT_DEFAULT_WALLETS : null;
+  // Local: deployment roles (Hardhat accounts) win over DEMO_*_WALLET values meant for Sepolia.
   const wallet = (envValue: string | undefined, fromRoles: string | undefined, fallback: string | undefined) =>
-    envValue || fromRoles || fallback || null;
+    (local ? fromRoles || fallback : envValue || fromRoles || fallback) || null;
 
   const commitmentSecret = env.COMMITMENT_SECRET || "";
   if (!commitmentSecret && env.NODE_ENV === "production") {
@@ -91,8 +96,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   return {
     port: Number(env.PORT || 4000),
-    dbPath: env.DB_PATH ? path.resolve(REPO_ROOT, env.DB_PATH) : path.join(SERVER_ROOT, "data", "bailbridge.db"),
-    storageDir: env.STORAGE_DIR ? path.resolve(REPO_ROOT, env.STORAGE_DIR) : path.join(SERVER_ROOT, "storage"),
+    // One database + storage folder per network, so local, Sepolia and off-chain data never mix.
+    dbPath: env.DB_PATH ? path.resolve(REPO_ROOT, env.DB_PATH) : path.join(SERVER_ROOT, "data", `bailbridge-${dataSuffix}.db`),
+    storageDir: env.STORAGE_DIR ? path.resolve(REPO_ROOT, env.STORAGE_DIR) : path.join(SERVER_ROOT, "storage", dataSuffix),
     publicWebUrl: (env.PUBLIC_WEB_URL || "http://localhost:5173").replace(/\/$/, ""),
     commitmentSecret: commitmentSecret || "dev-only-commitment-secret-change-me",
     demoPassword: env.DEMO_PASSWORD || "bailbridge-demo",

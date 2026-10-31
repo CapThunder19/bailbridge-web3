@@ -195,7 +195,7 @@ npm run deploy:local          # terminal 2: deploys BailRegistry, grants roles, 
 npm run seed -- --reset       # resets the local DB, seeds 5 demo cases + a revoked order on-chain
 ```
 
-It prints the hero-case link, `/verify` links for the active and revoked orders, and writes `server/storage/demo-files/` containing the original order PDF, a **one-byte-modified copy**, and the revoked order PDF for the verify demo.
+It prints the hero-case link, `/verify` links for the active and revoked orders, and writes `server/storage/<network>/demo-files/` containing the original order PDF, a **one-byte-modified copy**, and the revoked order PDF for the verify demo.
 
 ### 4. Run (terminal 2 and 3)
 
@@ -212,7 +212,7 @@ Open http://localhost:5173.
 
 ## Environment variables
 
-See [`.env.example`](.env.example). Highlights:
+See [`.env.example`](.env.example). One `.env` serves both setups: on a local Hardhat chain (chainId 31337) the deploy script, server and seed **ignore** the Sepolia role, RPC and key values and always use the well-known Hardhat accounts. Highlights:
 
 | Variable | Used by | Purpose |
 | --- | --- | --- |
@@ -253,14 +253,29 @@ Password: `bailbridge-demo` (or your `DEMO_PASSWORD`). The registrar is Hardhat 
 
 ## Deploying to Sepolia
 
-**Not yet deployed.** No Sepolia address is claimed in this repository. To deploy:
+### Current deployment
+
+| | |
+| --- | --- |
+| Network | Sepolia testnet (chainId 11155111) |
+| `BailRegistry` | [`0x21f3eefB7F513c68C8677cD4D153126Ad1ce7591`](https://sepolia.etherscan.io/address/0x21f3eefB7F513c68C8677cD4D153126Ad1ce7591) |
+| Deployment block | 12033500 |
+| Admin + registrar | [`0x3c99212efD67b909280Bc82Ce9Ac43b35fD616b2`](https://sepolia.etherscan.io/address/0x3c99212efD67b909280Bc82Ce9Ac43b35fD616b2) |
+| Lawyer (Demo) | [`0xB3c02afB535210A5675B363c9165d610924a4ac0`](https://sepolia.etherscan.io/address/0xB3c02afB535210A5675B363c9165d610924a4ac0) |
+| Issuer (Demo court) | [`0x6400323855e8059595cbd659c1f9Cc9c663D2019`](https://sepolia.etherscan.io/address/0x6400323855e8059595cbd659c1f9Cc9c663D2019) |
+| Prison (Demo) | [`0x455a064eB69b064124bcE89f677Ce89d50B92911`](https://sepolia.etherscan.io/address/0x455a064eB69b064124bcE89f677Ce89d50B92911) |
+
+The full record (with ABI) is [`deployments/sepolia.json`](deployments/sepolia.json). The browser reads it through the public RPC `https://ethereum-sepolia-rpc.publicnode.com`. All data on it is synthetic.
+
+To run the app against this deployment after working locally: `npm run use:sepolia`, then restart `server:dev` and `web:dev`. Local and Sepolia data are kept in separate databases (`server/data/bailbridge-<network>.db`) and storage folders (`server/storage/<network>/`).
+
+### Deploying your own
 
 1. Create four wallets (registrar/deployer, lawyer, issuer, prison) and fund each with Sepolia test ETH.
 2. In `.env` set `SEPOLIA_RPC_URL`, `DEPLOYER_PRIVATE_KEY`, `LAWYER_ADDRESSES`, `ISSUER_ADDRESSES`, `PRISON_ADDRESSES`, `PUBLIC_RPC_URL` (a public Sepolia RPC the browser can reach) and optionally `EXPLORER_URL` (defaults to `https://sepolia.etherscan.io`).
 3. `npm run deploy:sepolia` — writes `deployments/sepolia.json` (commit it) and the server/web copies.
 4. In `.env` set `RPC_URL`, `REGISTRAR_PRIVATE_KEY` (the deployer key, which holds the registrar role), `COMMITMENT_SECRET`, `PUBLIC_WEB_URL`, and `SEED_*_PRIVATE_KEY` for the three role wallets.
 5. `npm run seed -- --reset`, then `npm run build` and `npm run start -w server`.
-6. Add the contract address, deployment block and explorer link to this README **only after** the deployment exists.
 
 ## Off-chain mode
 
@@ -294,7 +309,7 @@ Prepare: `npm run chain`, `npm run deploy:local`, `npm run seed -- --reset`, `np
 | --- | --- |
 | **0:00–0:40** | Sign in as `caseworker`. The dashboard leads with **"Threshold reached, superintendent application not recorded (40 days)"** — Ravi K. (synthetic). Open it: 588 qualifying days against a 548-day threshold (one-half of the 3-year maximum for theft, previous conviction recorded); show reasons and the calculation. Back on the dashboard, open Arjun P.: other cases pending → **specialist review (s.479(2))**, no shortcut. |
 | **0:40–1:20** | Sign in as `prison` (MetaMask: Hardhat #3). On Ravi K.'s case, record the **s.479(3) written application** — watch awaiting wallet → submitted → confirmed. Sign in as `lawyer` (Hardhat #1): generate the DRAFT application, show the browser-computed hash, tick "reviewed", **sign and file**. |
-| **1:20–2:00** | Sign in as `issuer` (Hardhat #2): attest the order (QR first, then the PDF hash; structured hash separate). Open **/verify**: drop `server/storage/demo-files/order-original.pdf` → all checks pass; drop `order-modified-one-byte.pdf` → **not registered**; open the revoked-order link printed by the seed → **REVOKED**. |
+| **1:20–2:00** | Sign in as `issuer` (Hardhat #2): attest the order (QR first, then the PDF hash; structured hash separate). Open **/verify**: drop `server/storage/localhost/demo-files/order-original.pdf` (on Sepolia: `server/storage/sepolia/…`) → all checks pass; drop `order-modified-one-byte.pdf` → **not registered**; open the revoked-order link printed by the seed → **REVOKED**. |
 | **2:00–2:40** | Sign in as `prison`: acknowledge **order received**, then **release**. The case timeline now shows all six milestones with on-chain receipts (tx, wallet, time). |
 | **2:40–3:00** | Open **/release-clock**: anonymised counts and the case table — random IDs only. Close: *"Every party's duty, visible and verifiable."* |
 
@@ -308,7 +323,6 @@ Prepare: `npm run chain`, `npm run deploy:local`, `npm run seed -- --reset`, `np
 - The registrar is a single server wallet; registrar actions are as trustworthy as that server.
 - Elapsed-time badges show workflow delay; they are not statutory deadlines.
 - On-chain timestamps for seeded cases are the time of seeding, so `/release-clock` elapsed days start at 0 even where the screening threshold was reached earlier.
-- Not deployed to Sepolia at the time of writing.
 
 ## Roadmap
 

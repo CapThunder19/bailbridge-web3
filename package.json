@@ -26,6 +26,7 @@
     "web:test": "npm test -w web",
     "seed": "npm run seed -w server --",
     "test": "npm run contracts:test && npm run server:test && npm run web:test",
-    "build": "npm run contracts:compile && npm run server:build && npm run web:build"
+    "build": "npm run contracts:compile && npm run server:build && npm run web:build",
+    "use:sepolia": "node scripts/use-deployment.mjs sepolia"
   }
 }

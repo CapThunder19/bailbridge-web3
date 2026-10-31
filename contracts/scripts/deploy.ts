@@ -28,17 +28,20 @@ async function main() {
   const isLocal = network.name === "localhost" || network.name === "hardhat";
   const { chainId } = await ethers.provider.getNetwork();
 
-  const admin = process.env.ADMIN_ADDRESS ? ethers.getAddress(process.env.ADMIN_ADDRESS) : deployer.address;
-  const registrars = addressList(process.env.REGISTRAR_ADDRESS);
-  const lawyers = addressList(process.env.LAWYER_ADDRESSES);
-  const issuers = addressList(process.env.ISSUER_ADDRESSES);
-  const prisons = addressList(process.env.PRISON_ADDRESSES);
+  // A local Hardhat chain always uses the well-known Hardhat accounts, so the same .env
+  // (with Sepolia values filled in) also works for local development.
+  const env = (name: string) => (isLocal ? undefined : process.env[name]);
+  const admin = env("ADMIN_ADDRESS") ? ethers.getAddress(env("ADMIN_ADDRESS")!) : deployer.address;
+  const registrars = addressList(env("REGISTRAR_ADDRESS"));
+  const lawyers = addressList(env("LAWYER_ADDRESSES"));
+  const issuers = addressList(env("ISSUER_ADDRESSES"));
+  const prisons = addressList(env("PRISON_ADDRESSES"));
 
   if (isLocal) {
-    if (!registrars.length) registrars.push(deployer.address);
-    if (!lawyers.length) lawyers.push(rest[0].address);
-    if (!issuers.length) issuers.push(rest[1].address);
-    if (!prisons.length) prisons.push(rest[2].address);
+    registrars.push(deployer.address);
+    lawyers.push(rest[0].address);
+    issuers.push(rest[1].address);
+    prisons.push(rest[2].address);
   } else {
     if (!registrars.length) registrars.push(deployer.address);
     for (const [name, list] of [
@@ -85,10 +88,11 @@ async function main() {
   }
 
   const artifact = await artifacts.readArtifact("BailRegistry");
-  const explorerUrl =
-    process.env.EXPLORER_URL ?? (Number(chainId) === 11155111 ? "https://sepolia.etherscan.io" : null);
-  const publicRpcUrl =
-    process.env.PUBLIC_RPC_URL ?? (isLocal ? "http://127.0.0.1:8545" : null);
+  const explorerUrl = isLocal
+    ? null
+    : process.env.EXPLORER_URL || (Number(chainId) === 11155111 ? "https://sepolia.etherscan.io" : null);
+  const publicRpcUrl = isLocal ? "http://127.0.0.1:8545" : process.env.PUBLIC_RPC_URL || null;
+  if (!isLocal && !publicRpcUrl) console.warn("  PUBLIC_RPC_URL is not set: /verify and /release-clock will have no RPC to read from.");
 
   const deployment = {
     contract: "BailRegistry",

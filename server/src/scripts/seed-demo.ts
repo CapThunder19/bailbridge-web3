@@ -157,7 +157,7 @@ async function main() {
   // ---- role wallets
   const isLocal = ctx.chain.chainId === 31337;
   const key = (name: keyof typeof HARDHAT_KEYS, env: string) => {
-    const k = process.env[env] || (isLocal ? HARDHAT_KEYS[name] : "");
+    const k = isLocal ? HARDHAT_KEYS[name] : process.env[env] || "";
     if (!k) throw new Error(`${env} is required to seed on chain ${ctx.chain!.chainId}`);
     return k;
   };
