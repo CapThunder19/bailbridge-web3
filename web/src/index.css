@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-size: 17px;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-paper font-sans text-navy-900 antialiased;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-navy-600;
+  }
+}
