@@ -340,6 +340,39 @@ describe.skipIf(!live)("full browser-side journey on a live local stack", () => 
     ).rejects.toThrow(/not ACTIVE/);
   }, 120_000);
 
+  it("supersedes an order; /verify shows the old order SUPERSEDED with a link to the new one", async () => {
+    const { verify } = await import("./verify");
+    const { readRegistry } = await import("./deployment");
+    const { sendRegistryTx } = await import("./wallet");
+    const { hashBytes } = await import("./hash");
+    const caseId = await newReachedCase(cookies.caseworker!, `SYN/SUPERSEDE/${Date.now()}`);
+    const { orderId, pdf: oldPdf } = await fileAndAttest(caseId);
+
+    activeAccount = ACCOUNTS.issuer;
+    const prep = await call<{ orderId: string; structuredHash: string; pdfHash: string; reasonCommitment: string }>(
+      `/orders/${orderId}/supersede/prepare`,
+      cookies.issuer!,
+      { decision: "Corrected order with revised bond (synthetic demo).", conditions: [], bondAmountInr: 15000, orderDate: today(), reason: "Bond corrected (demo)" },
+    );
+    const newPdf = new Uint8Array(await (await fetch(`${API}/orders/${prep.orderId}/pdf`, { headers: { cookie: cookies.issuer! } })).arrayBuffer());
+    const txHash = await sendRegistryTx({
+      method: "supersedeOrder",
+      args: [orderId, prep.orderId, prep.structuredHash, hashBytes(newPdf), prep.reasonCommitment],
+      role: "ISSUER_ROLE",
+      expectedAccount: ACCOUNTS.issuer,
+      onStatus: () => {},
+    });
+    await call(`/orders/${prep.orderId}/supersede/confirm`, cookies.issuer!, { txHash });
+
+    const registry = readRegistry();
+    const oldV = await verify(registry, { fileHash: hashBytes(oldPdf) });
+    expect(oldV.kind === "order" && oldV.order.status).toBe("SUPERSEDED");
+    expect(oldV.kind === "order" && oldV.order.supersededBy).toBe(prep.orderId);
+    const newV = await verify(registry, { fileHash: hashBytes(newPdf) });
+    expect(newV.kind === "order" && newV.order.status).toBe("ACTIVE");
+    expect(newV.kind === "order" && newV.order.supersedes).toBe(orderId);
+  }, 120_000);
+
   it("distinguishes an unreachable RPC from 'not registered'", async () => {
     const { verify } = await import("./verify");
     const { Contract, JsonRpcProvider } = await import("ethers");

@@ -33,6 +33,7 @@ import {
   confirmMilestone,
   confirmOrder,
   confirmRevoke,
+  confirmSupersede,
   draftApplicationPdf,
   getApplicationRow,
   getOrderRow,
@@ -41,8 +42,10 @@ import {
   prepareMilestone,
   prepareOrder,
   prepareRevoke,
+  prepareSupersede,
   readStored,
   recordFiledApplication,
+  supersedeInputSchema,
 } from "./services/documents.js";
 
 type Handler = (req: Request, res: Response) => Promise<unknown> | unknown;
@@ -301,6 +304,26 @@ export function createApp(ctx: Ctx) {
     h(async (req) => {
       const order = await confirmRevoke(ctx, req.params.orderId!, req.user!, txBody.parse(req.body).txHash);
       return { order: { orderId: order.order_id, status: order.status, revokeTx: order.revoke_tx } };
+    }),
+  );
+
+  // P1: replace an ACTIVE order (append-only link old -> new).
+  api.post(
+    "/orders/:orderId/supersede/prepare",
+    requireRole("issuer"),
+    h(async (req, res) => {
+      const prepared = await prepareSupersede(ctx, req.params.orderId!, req.user!, supersedeInputSchema.parse(req.body));
+      res.status(201);
+      return prepared;
+    }),
+  );
+
+  api.post(
+    "/orders/:orderId/supersede/confirm",
+    requireRole("issuer"),
+    h(async (req) => {
+      const order = await confirmSupersede(ctx, req.params.orderId!, req.user!, txBody.parse(req.body).txHash);
+      return { order: { orderId: order.order_id, status: order.status, supersedes: order.supersedes, txHash: order.tx_hash } };
     }),
   );
 

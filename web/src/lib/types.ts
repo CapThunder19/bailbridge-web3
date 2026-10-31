@@ -156,6 +156,9 @@ export interface CaseDetail {
     revokeReason: string | null;
     revokeTx: string | null;
     revokedAt: number | null;
+    supersedes: string | null;
+    supersededBy: string | null;
+    supersedeReason: string | null;
     structured: Record<string, unknown>;
   }[];
 }

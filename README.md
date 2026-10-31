@@ -63,7 +63,7 @@ The primary user is a **legal-aid lawyer or NGO caseworker** handling many under
 | **Public `/release-clock`** | Anonymised aggregate from contract events since the deployment block: cases tracked, thresholds flagged, superintendent applications, applications filed, orders attested, releases acknowledged, plus a table of random case IDs with current milestone and elapsed days. No names, FIRs, offences or custody data. |
 | **Seed + off-chain mode** | One command seeds five demo cases (plus a revoked order) with DB and chain in agreement. Without chain configuration, intake, screening, timeline and PDFs still work and wallet actions are disabled. |
 
-Also implemented in the contract (P1): `supersedeOrder` — an append-only replacement link old → new. It is tested in the contract but has **no UI or API** yet.
+**P1 — supersede:** the issuer can replace an ACTIVE order with a corrected one. The old order stays on the log as SUPERSEDED with an append-only link old → new (reason kept off-chain, commitment on-chain); the prison must acknowledge the new order before release, and `/verify` shows the link in both directions.
 
 ## Why a blockchain
 
@@ -137,7 +137,7 @@ Source: **Bharatiya Nagarik Suraksha Sanhita, 2023 (Act 46 of 2023), s.479**; of
 | `fileApplication(caseId, pdfHash) → appId` | LAWYER | also records `APPLICATION_FILED` |
 | `attestOrder(caseId, appId, orderId, structuredOrderHash, pdfHash)` | ISSUER | application must belong to the case; one order per application; the two hashes must differ and are registered as different document kinds |
 | `revokeOrder(orderId, reasonCommitment)` | ISSUER | ACTIVE → REVOKED; history kept |
-| `supersedeOrder(old, new, …)` | ISSUER | P1: ACTIVE → SUPERSEDED with link old → new |
+| `supersedeOrder(old, new, structuredOrderHash, pdfHash, reasonCommitment)` | ISSUER | P1: ACTIVE → SUPERSEDED with link old → new; the new order needs its own prison receipt |
 | `attestMilestone(caseId, orderId, milestone, evidenceCommitment)` | per milestone | `THRESHOLD_FLAGGED` registrar; `SUPERINTENDENT_APPLICATION`, `ORDER_RECEIVED_BY_PRISON`, `RELEASE_ACKNOWLEDGED` prison. Receipt and release require an ACTIVE order of the same case; release requires recorded receipt |
 | `verifyDocument(hash) → (kind, id)`, `getCase`, `getApplication`, `getOrder`, `getMilestones` | public | |
 
@@ -278,8 +278,8 @@ Run on 31 Oct 2026 (Windows 11, Node 24.19) with a local Hardhat node and API se
 | Suite | Command | Result |
 | --- | --- | --- |
 | Contracts (Hardhat + ethers v6) | `npm run contracts:test` | **26 passing** — role restrictions per function, duplicate case/document/milestone, case–application–order linkage, PDF vs structured hash separation, one-byte PDF change rejected, revocation blocks dependent milestones, release prerequisites, history intact after revocation, supersede |
-| Server (Vitest) | `npm run server:test` | **81 passed** — screening engine (36: ceil boundaries for one-half and one-third, interruptions, invalid intervals, excluded days, unknown conviction, multiple pending cases, death/life, fine-only, unsupported, forbidden wording), offence CSV (10), hashing and commitments (10: original PDF accepted, one-byte-modified PDF rejected), API (20: auth, role enforcement, validation, dashboard, PDFs, off-chain mode, AI filter), **end-to-end on a real Hardhat node** (5: full journey, wrong signer, altered upload, replay, revoked order, wrong event) |
-| Web (Vitest) | `npm run web:test` | **10 passed** — browser hashing (2); live-stack integration (8): the browser wallet module signs every role action, `/verify` logic accepts the original order PDF and rejects a one-byte-modified one, QR-only lookup, REVOKED status, RPC-down vs not-registered, release-clock aggregate without personal data, render check of all case components for every role |
+| Server (Vitest) | `npm run server:test` | **82 passed** — screening engine (36: ceil boundaries for one-half and one-third, interruptions, invalid intervals, excluded days, unknown conviction, multiple pending cases, death/life, fine-only, unsupported, forbidden wording), offence CSV (10), hashing and commitments (10: original PDF accepted, one-byte-modified PDF rejected), API (20: auth, role enforcement, validation, dashboard, PDFs, off-chain mode, AI filter), **end-to-end on a real Hardhat node** (6: full journey, wrong signer, altered upload, replay, revoked order, wrong event, supersede) |
+| Web (Vitest) | `npm run web:test` | **11 passed** — browser hashing (2); live-stack integration (9): the browser wallet module signs every role action, `/verify` logic accepts the original order PDF and rejects a one-byte-modified one, QR-only lookup, REVOKED and SUPERSEDED status, RPC-down vs not-registered, release-clock aggregate without personal data, render check of all case components for every role |
 | Build | `npm run build` | contracts compile, server `tsc` and web `tsc` + `vite build` succeed with no warnings |
 
 `npm test` runs all three suites. The web live-stack tests are **skipped** (and reported as skipped) when the local chain, deployment and API server are not running.
@@ -308,14 +308,12 @@ Prepare: `npm run chain`, `npm run deploy:local`, `npm run seed -- --reset`, `np
 - The registrar is a single server wallet; registrar actions are as trustworthy as that server.
 - Elapsed-time badges show workflow delay; they are not statutory deadlines.
 - On-chain timestamps for seeded cases are the time of seeding, so `/release-clock` elapsed days start at 0 even where the screening threshold was reached earlier.
-- `supersedeOrder` exists in the contract and its tests only.
 - Not deployed to Sepolia at the time of writing.
 
 ## Roadmap
 
 Not built — ideas for future work:
 
-- Issuer UI and API for superseding orders (contract support exists)
 - Signed-challenge wallet binding for user accounts
 - Hindi / English interface toggle
 - Zero-knowledge proofs of threshold eligibility without revealing custody data

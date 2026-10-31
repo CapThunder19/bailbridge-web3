@@ -33,6 +33,22 @@ export interface ConfirmedEvent {
   txHash: string;
 }
 
+/**
+ * Poll for a transaction receipt (= 1 confirmation). Used instead of ethers'
+ * tx.wait()/waitForTransaction(), which compare against a briefly cached block
+ * number and can then wait for a *new* block — which never comes on an idle
+ * automining Hardhat node.
+ */
+export async function waitForReceipt(provider: JsonRpcProvider, txHash: string, timeoutMs = 120_000, intervalMs = 500) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (receipt) return receipt;
+    if (Date.now() > deadline) throw Object.assign(new Error("Timed out waiting for the transaction."), { code: "TIMEOUT" });
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
 /** Translate ethers/RPC errors into plain language. */
 export function explainChainError(err: unknown): string {
   const e = err as { code?: string; shortMessage?: string; message?: string; revert?: { name?: string } };
@@ -76,7 +92,7 @@ export class ChainService {
       try {
         const fn = this.contract.getFunction(method);
         const tx = await fn(...args);
-        const receipt = await tx.wait(1, 120_000);
+        const receipt = await waitForReceipt(this.provider, tx.hash as string);
         if (!receipt || receipt.status !== 1) throw new ChainError(`${method} transaction failed.`);
         return { txHash: receipt.hash as string, blockNumber: receipt.blockNumber as number };
       } catch (err) {
@@ -129,7 +145,7 @@ export class ChainService {
     let receipt;
     let tx;
     try {
-      receipt = await this.provider.waitForTransaction(txHash, 1, 120_000);
+      receipt = await waitForReceipt(this.provider, txHash);
       tx = await this.provider.getTransaction(txHash);
     } catch (err) {
       throw new ChainError(explainChainError(err));

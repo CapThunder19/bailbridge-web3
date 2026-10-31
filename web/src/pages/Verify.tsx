@@ -217,6 +217,12 @@ function ResultView({ result }: { result: VerifyResult }) {
               </Check>
               <Check ok={active} label={`Order status: ${order.status}`}>
                 {active && "The order is ACTIVE on the registry."}
+                {order.supersedes && (
+                  <>
+                    {" "}
+                    It replaces earlier order <Hash value={order.supersedes} />.
+                  </>
+                )}
                 {order.status === "REVOKED" && <>Revoked {formatUnix(order.statusChangedAt)}. The reason is recorded off-chain; only its commitment is on-chain.</>}
                 {order.status === "SUPERSEDED" && (
                   <>

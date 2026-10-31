@@ -31,15 +31,16 @@ The parties do not share a database or fully trust each other. A shared append-o
 
 | Implemented and tested | Simulated / prototype |
 | --- | --- |
-| `BailRegistry` contract (AccessControl, custom errors, events, duplicate prevention, linkage validation, revocation; 26 tests) | Institutional identities — "Demo court issuer", "Demo district prison" are wallets, not real institutions |
+| `BailRegistry` contract (AccessControl, custom errors, events, duplicate prevention, linkage validation, revocation, supersede; 26 tests) | Institutional identities — "Demo court issuer", "Demo district prison" are wallets, not real institutions |
 | s.479 screening engine with 20-variant reviewed BNS offence dataset (36 engine tests) | All people and cases are synthetic |
 | Express API with password login, httpOnly sessions, server-side role checks, wallet-signer checks on every confirmation | Wallet ↔ account binding is a configured mapping (no signed challenge yet) |
 | Salted, versioned commitments; anchoring and threshold flagging by a registrar wallet | Registrar is a single server wallet |
 | DRAFT application PDF and order PDF with QR; browser-side hashing; server re-verification against the confirmed tx | Order text is written by the Demo issuer in the app, not issued by a court |
 | Public `/verify` and `/release-clock` reading the contract via public RPC | No integration with e-Courts, ICJS or FASTER |
+| Order supersession (P1): append-only old → new link, fresh prison receipt required, shown on `/verify` |
 | Seed script: 5 demo cases + a revoked order, DB and chain in agreement | Gemini advisory summary is optional; a deterministic summary is used without a key |
 | Off-chain mode (no fake tx hashes) | Sepolia deployment: steps documented, **not yet deployed** |
-| End-to-end tests on a real Hardhat node; live-stack browser wallet tests (117 tests in total) | UI not click-tested with MetaMask in an automated browser |
+| End-to-end tests on a real Hardhat node; live-stack browser wallet tests (119 tests in total) | UI not click-tested with MetaMask in an automated browser |
 
 ## Tech stack
 
@@ -62,7 +63,6 @@ It is designed to complement official systems such as the Supreme Court's FASTER
 
 ## Roadmap
 
-- Issuer UI for superseding orders (contract support exists)
 - Signed-challenge wallet binding
 - Hindi / English interface
 - Zero-knowledge proofs of threshold eligibility

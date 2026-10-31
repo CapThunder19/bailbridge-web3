@@ -120,7 +120,24 @@ export function openDb(file: string): DB {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+/** Additive column migrations for databases created by earlier versions. */
+const ADDED_COLUMNS: [table: string, column: string, type: string][] = [
+  ["orders", "supersedes", "TEXT"], // order ID this order replaces (append-only link old -> new)
+  ["orders", "superseded_by", "TEXT"],
+  ["orders", "supersede_reason", "TEXT"], // reason stays off-chain; only its commitment is on-chain
+  ["orders", "supersede_salt", "TEXT"],
+  ["orders", "supersede_commitment", "TEXT"],
+];
+
+function migrate(db: DB): void {
+  for (const [table, column, type] of ADDED_COLUMNS) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
 }
 
 export const nowIso = () => new Date().toISOString();

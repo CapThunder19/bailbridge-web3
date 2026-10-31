@@ -19,6 +19,8 @@ export interface StructuredOrder {
   issuerWallet: string;
   legalProvision: string;
   synthetic: true;
+  /** Present only on a replacement order: the order ID it supersedes. */
+  supersedes?: string;
 }
 
 export function verifyUrl(publicWebUrl: string, orderId: string): string {
@@ -53,6 +55,7 @@ export async function buildOrderPdf(order: StructuredOrder, structuredHash: stri
     ["Applicant", order.applicantName],
     ["Application (on-chain ID)", `#${order.chainApplicationId}`],
     ["Application PDF hash", order.applicationPdfHash],
+    ...(order.supersedes ? ([["Supersedes order", order.supersedes]] as [string, string][]) : []),
   ], 150);
 
   f.heading("Order");

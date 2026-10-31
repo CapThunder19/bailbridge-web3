@@ -145,6 +145,90 @@ function RevokeForm({ order, user, onChange }: { order: Order; user: User; onCha
   );
 }
 
+/**
+ * P1: replace an ACTIVE order with a corrected one. The old order stays on the log as
+ * SUPERSEDED with an append-only link old -> new; the prison must acknowledge the new order.
+ */
+function SupersedeForm({ order, user, onChange }: { order: Order; user: User; onChange: () => void }) {
+  const prev = order.structured as { decision?: string; conditions?: string[]; bondAmountInr?: number | null };
+  const [open, setOpen] = useState(false);
+  const [decision, setDecision] = useState(prev.decision ?? "");
+  const [conditions, setConditions] = useState((prev.conditions ?? []).join("\n"));
+  const [bond, setBond] = useState(prev.bondAmountInr == null ? "" : String(prev.bondAmountInr));
+  const [orderDate, setOrderDate] = useState(todayIso());
+  const [reason, setReason] = useState("");
+  const tx = useTxFlow();
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    void tx.run(async (update) => {
+      update({ phase: "checking", message: "Preparing the replacement order JSON and PDF…" });
+      const prep = await api.post<Prepared & { supersedes: string; reasonCommitment: string }>(`/orders/${order.orderId}/supersede/prepare`, {
+        decision,
+        conditions: conditions.split("\n").map((c) => c.trim()).filter(Boolean),
+        bondAmountInr: bond === "" ? null : Number(bond),
+        orderDate,
+        reason,
+      });
+      const bytes = await api.bytes(`/orders/${prep.orderId}/pdf`);
+      const localHash = hashBytes(bytes);
+      if (localHash.toLowerCase() !== prep.pdfHash.toLowerCase()) {
+        throw new WalletError("The PDF you downloaded does not match the hash the server prepared. Not signing.");
+      }
+      const txHash = await sendRegistryTx({
+        method: "supersedeOrder",
+        args: [order.orderId, prep.orderId, prep.structuredHash, localHash, prep.reasonCommitment],
+        role: "ISSUER_ROLE",
+        expectedAccount: user.walletAddress,
+        onStatus: update,
+      });
+      update({ phase: "recording", txHash, message: "Server is checking the confirmed supersession…" });
+      await api.post(`/orders/${prep.orderId}/supersede/confirm`, { txHash });
+      update({ phase: "confirmed", txHash, message: "Replacement order is ACTIVE; the previous order is SUPERSEDED." });
+      onChange();
+    });
+  }
+
+  if (!open) {
+    return (
+      <Button variant="secondary" className="mt-2" onClick={() => setOpen(true)}>
+        Supersede with a corrected order…
+      </Button>
+    );
+  }
+  return (
+    <form onSubmit={submit} className="mt-3 w-full space-y-3 rounded-lg border border-paper-200 p-4">
+      <h3 className="font-semibold">Replacement order</h3>
+      <Field label="Order text (synthetic)">
+        <textarea className={`${inputClass} min-h-24`} value={decision} onChange={(e) => setDecision(e.target.value)} required minLength={10} />
+      </Field>
+      <Field label="Conditions" hint="One per line.">
+        <textarea className={`${inputClass} min-h-16`} value={conditions} onChange={(e) => setConditions(e.target.value)} />
+      </Field>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Bond amount (Rs)">
+          <input className={inputClass} type="number" min={0} value={bond} onChange={(e) => setBond(e.target.value)} />
+        </Field>
+        <Field label="Order date">
+          <input className={inputClass} type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} required />
+        </Field>
+      </div>
+      <Field label="Reason for replacing the order" hint="Kept off-chain; only a salted commitment is recorded.">
+        <input className={inputClass} value={reason} onChange={(e) => setReason(e.target.value)} required minLength={5} />
+      </Field>
+      <div className="flex gap-2">
+        <Button type="submit" disabled={tx.busy || tx.status.phase === "confirmed"}>
+          Prepare, sign and supersede
+        </Button>
+        <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={tx.busy}>
+          Cancel
+        </Button>
+      </div>
+      <TxStatusView status={tx.status} lastPhase={tx.lastPhase} />
+    </form>
+  );
+}
+
 /** Orders on the case (visible to all roles) with issuer actions. */
 export function OrdersCard({ detail, user, onChange }: { detail: CaseDetail; user: User; onChange: () => void }) {
   const isIssuer = user.role === "issuer";
@@ -177,6 +261,17 @@ export function OrdersCard({ detail, user, onChange }: { detail: CaseDetail; use
                     {o.revokeReason ? ` — ${o.revokeReason}` : ""}
                   </p>
                 )}
+                {o.supersededBy && (
+                  <p className="text-stone-800">
+                    Superseded by order <Hash value={o.supersededBy} />
+                  </p>
+                )}
+                {o.supersedes && (
+                  <p className="text-stone-800">
+                    Replaces order <Hash value={o.supersedes} />
+                    {o.supersedeReason ? ` — ${o.supersedeReason}` : ""}
+                  </p>
+                )}
               </div>
               <div className="mt-2 flex flex-wrap gap-4 text-sm font-semibold">
                 <a className="text-navy-700 underline" href={`/api/orders/${o.orderId}/pdf`} target="_blank" rel="noreferrer">
@@ -186,7 +281,12 @@ export function OrdersCard({ detail, user, onChange }: { detail: CaseDetail; use
                   Public verification page
                 </Link>
               </div>
-              {isIssuer && o.status === "ACTIVE" && deployment && <RevokeForm order={o} user={user} onChange={onChange} />}
+              {isIssuer && o.status === "ACTIVE" && deployment && (
+                <div className="flex flex-wrap gap-x-3">
+                  <RevokeForm order={o} user={user} onChange={onChange} />
+                  <SupersedeForm order={o} user={user} onChange={onChange} />
+                </div>
+              )}
             </li>
           ))}
         </ul>

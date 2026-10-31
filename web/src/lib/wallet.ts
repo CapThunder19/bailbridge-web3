@@ -155,12 +155,27 @@ export async function sendRegistryTx(opts: {
     const tx = await registry.getFunction(method)(...args);
     txHash = tx.hash as string;
     onStatus({ phase: "submitted", txHash, message: "Submitted — waiting for confirmation…" });
-    const receipt = await tx.wait(1);
+    const receipt = await waitForReceipt(provider, txHash);
     if (!receipt || receipt.status !== 1) throw new WalletError("The transaction failed on-chain.");
   } catch (err) {
     throw new WalletError(explainWalletError(err));
   }
   return txHash;
+}
+
+/**
+ * Poll for the receipt (= 1 confirmation) instead of tx.wait(): ethers compares against a
+ * briefly cached block number and may then wait for a new block, which never arrives on an
+ * idle automining local chain.
+ */
+async function waitForReceipt(provider: BrowserProvider, txHash: string, timeoutMs = 180_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (receipt) return receipt;
+    if (Date.now() > deadline) throw new WalletError("Timed out waiting for confirmation. Check the transaction in your wallet or explorer.");
+    await new Promise((r) => setTimeout(r, 1000));
+  }
 }
 
 export function short(addr: string | null | undefined, n = 6): string {

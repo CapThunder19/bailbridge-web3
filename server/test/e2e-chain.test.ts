@@ -11,6 +11,7 @@ import type { Express } from "express";
 import { createApp } from "../src/app.js";
 import { drainAnchorJobs } from "../src/services/cases.js";
 import { REPO_ROOT } from "../src/config.js";
+import { waitForReceipt } from "../src/chain.js";
 import { caseInput, login, testCtx } from "./helpers.js";
 
 const PORT = 8547;
@@ -68,7 +69,7 @@ beforeAll(async () => {
   await deployed.waitForDeployment();
   const address = await deployed.getAddress();
   registry = new Contract(address, artifact.abi, provider);
-  const deploymentBlock = (await deployed.deploymentTransaction()!.wait())!.blockNumber;
+  const deploymentBlock = (await waitForReceipt(provider, deployed.deploymentTransaction()!.hash)).blockNumber;
 
   lawyerW = signer(1);
   issuerW = signer(2);
@@ -76,7 +77,7 @@ beforeAll(async () => {
   rogueW = signer(4);
   const admin = as(deployer);
   const grant = async (role: string, w: NonceManager) =>
-    (await admin.getFunction("grantRole")(await registry.getFunction(role)(), await w.getAddress())).wait();
+    waitForReceipt(provider, (await admin.getFunction("grantRole")(await registry.getFunction(role)(), await w.getAddress())).hash);
   await grant("REGISTRAR_ROLE", deployer);
   await grant("LAWYER_ROLE", lawyerW);
   await grant("ISSUER_ROLE", issuerW);
@@ -135,7 +136,7 @@ async function fileApplication(caseId: string) {
   const bytes = draft.body as Buffer;
   const pdfHash = keccak256(bytes);
   const tx = await as(lawyerW).getFunction("fileApplication")(caseId, pdfHash);
-  await tx.wait();
+  await waitForReceipt(provider, tx.hash);
   return { lawyer, bytes, pdfHash, txHash: tx.hash as string };
 }
 
@@ -159,7 +160,7 @@ async function attestOrder(caseId: string, applicationId: number) {
     prep.body.structuredHash,
     prep.body.pdfHash,
   );
-  await tx.wait();
+  await waitForReceipt(provider, tx.hash);
   const confirm = await issuer.post(`/api/orders/${prep.body.orderId}/confirm`).send({ txHash: tx.hash });
   expect(confirm.status).toBe(200);
   expect(confirm.body.order.status).toBe("ACTIVE");
@@ -178,7 +179,7 @@ async function prisonMilestone(caseId: string, milestone: string, orderId: strin
     prep.body.milestoneIndex,
     prep.body.evidenceCommitment,
   );
-  await tx.wait();
+  await waitForReceipt(provider, tx.hash);
   const confirm = await prison.post(`/api/milestones/${prep.body.milestoneId}/confirm`).send({ txHash: tx.hash });
   return { prep, confirm };
 }
@@ -287,7 +288,7 @@ describe("end-to-end on a local chain", () => {
     const prep = await order.issuer.post(`/api/orders/${order.orderId}/revoke/prepare`).send({ reason: "Order issued on incorrect application (demo)" });
     expect(prep.status).toBe(200);
     const tx = await as(issuerW).getFunction("revokeOrder")(order.orderId, prep.body.reasonCommitment);
-    await tx.wait();
+    await waitForReceipt(provider, tx.hash);
     const conf = await order.issuer.post(`/api/orders/${order.orderId}/revoke/confirm`).send({ txHash: tx.hash });
     expect(conf.status).toBe(200);
     expect(conf.body.order.status).toBe("REVOKED");
@@ -339,10 +340,72 @@ describe("end-to-end on a local chain", () => {
     const o2 = await attestOrder(other.case.id, up2.body.application.id);
     const rv = await o2.issuer.post(`/api/orders/${o2.orderId}/revoke/prepare`).send({ reason: "Testing wrong-event confirmation" });
     const rvTx = await as(issuerW).getFunction("revokeOrder")(o2.orderId, rv.body.reasonCommitment);
-    await rvTx.wait();
+    await waitForReceipt(provider, rvTx.hash);
     const wrongEvent = await issuer.post(`/api/orders/${prep.body.orderId}/confirm`).send({ txHash: rvTx.hash });
     expect(wrongEvent.status).toBe(409);
     expect(wrongEvent.body.error).toMatch(/OrderAttested/);
     void abi;
   }, 120_000);
+
+  it("supersedes an order: old -> new link, fresh receipt required before release", async () => {
+    const d = await createAnchoredCase(588, { caseRef: "SYN/E2E/SUPERSEDE" });
+    const caseId = d.case.id as string;
+    const filed = await fileApplication(caseId);
+    const up = await filed.lawyer
+      .post(`/api/cases/${caseId}/applications?txHash=${filed.txHash}`)
+      .set("content-type", "application/pdf")
+      .send(filed.bytes);
+    const first = await attestOrder(caseId, up.body.application.id);
+    expect((await prisonMilestone(caseId, "ORDER_RECEIVED_BY_PRISON", first.orderId)).confirm!.status).toBe(200);
+
+    const prep = await first.issuer.post(`/api/orders/${first.orderId}/supersede/prepare`).send({
+      decision: "Corrected order: admitted to bail on personal bond with one surety (synthetic demo).",
+      conditions: ["Appear on every date of hearing"],
+      bondAmountInr: 15000,
+      orderDate: "2026-10-30",
+      reason: "Bond amount corrected (demo)",
+    });
+    expect(prep.status).toBe(201);
+    expect(prep.body.supersedes).toBe(first.orderId);
+    const newPdf = await first.issuer.get(`/api/orders/${prep.body.orderId}/pdf`).buffer(true).parse(binary);
+    expect(keccak256(newPdf.body as Buffer)).toBe(prep.body.pdfHash);
+
+    // A replacement order cannot be confirmed through the plain attestation path.
+    expect((await first.issuer.post(`/api/orders/${prep.body.orderId}/confirm`).send({ txHash: filed.txHash })).status).toBe(409);
+
+    const tx = await as(issuerW).getFunction("supersedeOrder")(
+      first.orderId,
+      prep.body.orderId,
+      prep.body.structuredHash,
+      prep.body.pdfHash,
+      prep.body.reasonCommitment,
+    );
+    await waitForReceipt(provider, tx.hash);
+    const conf = await first.issuer.post(`/api/orders/${prep.body.orderId}/supersede/confirm`).send({ txHash: tx.hash });
+    expect(conf.status).toBe(200);
+    expect(conf.body.order).toMatchObject({ status: "ACTIVE", supersedes: first.orderId });
+
+    const cw = await login(app, "caseworker");
+    const detail = (await cw.get(`/api/cases/${caseId}`)).body;
+    const byId = Object.fromEntries(detail.orders.map((o: { orderId: string }) => [o.orderId, o]));
+    expect(byId[first.orderId]).toMatchObject({ status: "SUPERSEDED", supersededBy: prep.body.orderId });
+    expect(byId[prep.body.orderId]).toMatchObject({ status: "ACTIVE", supersedes: first.orderId, supersedeReason: "Bond amount corrected (demo)" });
+    expect(detail.workflow.activeOrderId).toBe(prep.body.orderId);
+    expect(detail.workflow.steps[4].state).toBe("open"); // receipt of the OLD order does not carry over
+
+    // On-chain: old SUPERSEDED with link, new ACTIVE linking back.
+    const oldOnChain = await registry.getFunction("getOrder")(first.orderId);
+    const newOnChain = await registry.getFunction("getOrder")(prep.body.orderId);
+    expect(Number(oldOnChain.status)).toBe(3);
+    expect(oldOnChain.supersededBy).toBe(prep.body.orderId);
+    expect(newOnChain.supersedes).toBe(first.orderId);
+
+    // Old order can no longer be superseded or acknowledged; new order needs its own receipt.
+    expect((await first.issuer.post(`/api/orders/${first.orderId}/supersede/prepare`).send({
+      decision: "Another attempt on a superseded order.", orderDate: "2026-10-30", reason: "should fail",
+    })).status).toBe(409);
+    expect((await prisonMilestone(caseId, "RELEASE_ACKNOWLEDGED", prep.body.orderId)).prep.status).toBe(409);
+    expect((await prisonMilestone(caseId, "ORDER_RECEIVED_BY_PRISON", prep.body.orderId)).confirm!.status).toBe(200);
+    expect((await prisonMilestone(caseId, "RELEASE_ACKNOWLEDGED", prep.body.orderId)).confirm!.status).toBe(200);
+  }, 180_000);
 });

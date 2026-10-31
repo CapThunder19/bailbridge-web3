@@ -33,6 +33,7 @@ import {
 import { verifyUrl } from "../pdf/order.js";
 import { hashBytes } from "../lib/hashing.js";
 import { statusHeadline } from "../screening/engine.js";
+import { waitForReceipt } from "../chain.js";
 
 const HARDHAT_KEYS = {
   lawyer: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
@@ -176,7 +177,8 @@ async function main() {
   const as = (w: NonceManager) => new Contract(ctx.chain!.address, abi, w);
   const send = async (w: NonceManager, method: string, args: unknown[]) => {
     const tx = await as(w).getFunction(method)(...args);
-    await tx.wait();
+    const receipt = await waitForReceipt(ctx.chain!.provider, tx.hash as string);
+    if (receipt.status !== 1) throw new Error(`${method} transaction failed`);
     return tx.hash as string;
   };
 

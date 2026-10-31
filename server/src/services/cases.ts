@@ -123,6 +123,11 @@ export interface OrderRow {
   revoke_commitment: string | null;
   revoke_tx: string | null;
   revoked_at: number | null;
+  supersedes: string | null;
+  superseded_by: string | null;
+  supersede_reason: string | null;
+  supersede_salt: string | null;
+  supersede_commitment: string | null;
   created_at: string;
 }
 
@@ -720,6 +725,9 @@ export function caseDetail(ctx: Ctx, id: string, viewer: User) {
       revokeReason: o.status === "REVOKED" ? o.revoke_reason : null,
       revokeTx: o.revoke_tx,
       revokedAt: o.revoked_at,
+      supersedes: o.supersedes,
+      supersededBy: o.superseded_by,
+      supersedeReason: o.supersedes && o.status !== "PREPARED" ? o.supersede_reason : null,
       structured: JSON.parse(o.structured_json) as unknown,
     })),
   };

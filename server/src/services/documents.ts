@@ -160,7 +160,22 @@ export async function prepareOrder(ctx: Ctx, caseId: string, user: User, input: 
     .get(app.id);
   if (existing) throw new HttpError(409, "An order has already been attested on this application.");
   ctx.db.prepare("DELETE FROM orders WHERE application_id = ? AND status = 'PREPARED'").run(app.id);
+  return buildPreparedOrder(ctx, caseId, app, user, wallet, input, null);
+}
 
+type OrderContent = Omit<OrderInput, "applicationId">;
+
+/** Build canonical JSON + PDF (QR first, then hash final bytes) and store as PREPARED. */
+async function buildPreparedOrder(
+  ctx: Ctx,
+  caseId: string,
+  app: ApplicationRow,
+  user: User,
+  wallet: string,
+  input: OrderContent,
+  supersede: { oldOrderId: string; reason: string; salt: string; commitment: string } | null,
+) {
+  const row = getCaseRow(ctx, caseId);
   const orderId = randomBytes32();
   const structured: StructuredOrder = {
     schema: "bailbridge.order.v1",
@@ -179,6 +194,7 @@ export async function prepareOrder(ctx: Ctx, caseId: string, user: User, input: 
     issuerWallet: wallet,
     legalProvision: "s.479 Bharatiya Nagarik Suraksha Sanhita, 2023",
     synthetic: true,
+    ...(supersede ? { supersedes: supersede.oldOrderId } : {}),
   };
   const structuredHash = hashCanonicalJson(structured);
   const url = verifyUrl(ctx.config.publicWebUrl, orderId);
@@ -188,12 +204,90 @@ export async function prepareOrder(ctx: Ctx, caseId: string, user: User, input: 
 
   ctx.db
     .prepare(
-      `INSERT INTO orders (order_id, case_id, application_id, structured_json, structured_hash, pdf_hash, pdf_path, status, issuer_user_id, issuer_wallet, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'PREPARED', ?, ?, ?)`,
+      `INSERT INTO orders (order_id, case_id, application_id, structured_json, structured_hash, pdf_hash, pdf_path, status, issuer_user_id, issuer_wallet,
+         supersedes, supersede_reason, supersede_salt, supersede_commitment, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'PREPARED', ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(orderId, caseId, app.id, JSON.stringify(structured), structuredHash, pdfHash, pdfPath, user.id, wallet.toLowerCase(), nowIso());
+    .run(
+      orderId,
+      caseId,
+      app.id,
+      JSON.stringify(structured),
+      structuredHash,
+      pdfHash,
+      pdfPath,
+      user.id,
+      wallet.toLowerCase(),
+      supersede?.oldOrderId ?? null,
+      supersede?.reason ?? null,
+      supersede?.salt ?? null,
+      supersede?.commitment ?? null,
+      nowIso(),
+    );
 
-  return { orderId, caseId, chainAppId: app.chain_app_id, structuredHash, pdfHash, verifyUrl: url };
+  return {
+    orderId,
+    caseId,
+    chainAppId: app.chain_app_id,
+    structuredHash,
+    pdfHash,
+    verifyUrl: url,
+    ...(supersede ? { supersedes: supersede.oldOrderId, reasonCommitment: supersede.commitment } : {}),
+  };
+}
+
+export const supersedeInputSchema = orderInputSchema.omit({ applicationId: true }).extend({
+  reason: z.string().trim().min(5).max(500),
+});
+export type SupersedeInput = z.infer<typeof supersedeInputSchema>;
+
+/**
+ * Prepare a replacement for an ACTIVE order (P1). The new order is linked to the old
+ * one (append-only, old -> new); the reason stays off-chain, its commitment goes on-chain.
+ */
+export async function prepareSupersede(ctx: Ctx, oldOrderId: string, user: User, input: SupersedeInput) {
+  requireChain(ctx);
+  const wallet = requireWallet(user);
+  const old = getOrderRow(ctx, oldOrderId);
+  if (old.status !== "ACTIVE") throw new HttpError(409, `Only an ACTIVE order can be superseded (this one is ${old.status}).`);
+  const app = getApplicationRow(ctx, old.application_id);
+  ctx.db.prepare("DELETE FROM orders WHERE supersedes = ? AND status = 'PREPARED'").run(oldOrderId);
+  const { salt, commitment } = commit(ctx, "order.supersession", { oldOrderId, reason: input.reason, supersededBy: user.username });
+  const { reason, ...content } = input;
+  return buildPreparedOrder(ctx, old.case_id, app, user, wallet, content, { oldOrderId, reason, salt, commitment });
+}
+
+export async function confirmSupersede(ctx: Ctx, newOrderId: string, user: User, txHash: string) {
+  const chain = requireChain(ctx);
+  const wallet = requireWallet(user);
+  const order = getOrderRow(ctx, newOrderId);
+  if (order.status !== "PREPARED" || !order.supersedes) throw new HttpError(409, "No supersession is pending for this order.");
+  if (order.issuer_user_id !== user.id) throw new HttpError(403, "Only the issuer who prepared this order can confirm it.");
+  const old = getOrderRow(ctx, order.supersedes);
+  if (old.status !== "ACTIVE") throw new HttpError(409, `The order being replaced is ${old.status}.`);
+  const app = getApplicationRow(ctx, order.application_id);
+
+  const confirmed = await chain.confirmWalletTx(txHash, "OrderSuperseded", wallet);
+  const s = confirmed.event.args;
+  if (!eq(s.oldOrderId, old.order_id) || !eq(s.newOrderId, newOrderId))
+    throw new HttpError(409, "The transaction superseded a different pair of orders.");
+  if (!eq(s.caseId, order.case_id)) throw new HttpError(409, "The transaction is for a different case.");
+  if (!eq(s.reasonCommitment, order.supersede_commitment)) throw new HttpError(409, "Supersession reason commitment mismatch.");
+  const [attested] = await chain.eventsInTx(confirmed.txHash, "OrderAttested");
+  const a = attested?.args;
+  if (!a || !eq(a.orderId, newOrderId)) throw new HttpError(409, "The transaction did not attest the replacement order.");
+  if (Number(a.appId) !== app.chain_app_id) throw new HttpError(409, "The replacement is linked to a different application.");
+  if (!eq(a.structuredOrderHash, order.structured_hash)) throw new HttpError(409, "Structured order hash mismatch.");
+  if (!eq(a.pdfHash, order.pdf_hash)) throw new HttpError(409, "Order PDF hash mismatch.");
+  if (!eq(a.issuer, wallet)) throw new HttpError(403, "The on-chain issuer is not your mapped wallet.");
+
+  ctx.db.transaction(() => {
+    ctx.db
+      .prepare("UPDATE orders SET status = 'ACTIVE', tx_hash = ?, block_number = ?, chain_timestamp = ? WHERE order_id = ?")
+      .run(confirmed.txHash, confirmed.blockNumber, confirmed.timestamp, newOrderId);
+    ctx.db.prepare("UPDATE orders SET status = 'SUPERSEDED', superseded_by = ? WHERE order_id = ?").run(newOrderId, old.order_id);
+  })();
+  return getOrderRow(ctx, newOrderId);
 }
 
 export async function confirmOrder(ctx: Ctx, orderId: string, user: User, txHash: string) {
@@ -201,6 +295,7 @@ export async function confirmOrder(ctx: Ctx, orderId: string, user: User, txHash
   const wallet = requireWallet(user);
   const order = getOrderRow(ctx, orderId);
   if (order.status !== "PREPARED") throw new HttpError(409, `Order is already ${order.status}.`);
+  if (order.supersedes) throw new HttpError(409, "This is a replacement order; confirm it as a supersession.");
   if (order.issuer_user_id !== user.id) throw new HttpError(403, "Only the issuer who prepared this order can confirm it.");
   const app = getApplicationRow(ctx, order.application_id);
 
